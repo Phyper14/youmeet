@@ -1,431 +1,321 @@
-# Configuration Guide
+# Configuração - YouMeet
 
-## Overview
+## Variáveis de Ambiente
 
-YouMeet currently uses minimal configuration with sensible defaults. This guide covers current configuration options and future extensibility.
+### Configuração de Banco de Dados
 
-## Current Configuration
-
-### Server Configuration
-
-The application currently uses hardcoded configuration in `cmd/main.go`:
-
-```go
-log.Fatal(http.ListenAndServe(":8080", r))
-```
-
-**Default Settings:**
-- **Port**: 8080
-- **Host**: localhost (0.0.0.0 when deployed)
-- **Protocol**: HTTP
-
-### Storage Configuration
-
-Currently uses in-memory storage with no persistence:
-
-```go
-repo := adapters.NewMemoryRepository()
-```
-
-**Characteristics:**
-- **Type**: In-memory maps
-- **Persistence**: None (data lost on restart)
-- **Concurrency**: Not thread-safe (single-threaded access)
-
-## Environment Variables
-
-### Recommended Environment Variables
-
-While not currently implemented, these environment variables should be supported:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | 8080 | Server port |
-| `HOST` | localhost | Server host |
-| `LOG_LEVEL` | info | Logging level (debug, info, warn, error) |
-| `DB_TYPE` | memory | Database type (memory, postgres, mysql) |
-| `DB_URL` | - | Database connection string |
-| `DB_MAX_CONNECTIONS` | 10 | Maximum database connections |
-| `API_TIMEOUT` | 30s | API request timeout |
-
-### Example Environment Setup
-
-**Development (.env file):**
+#### PostgreSQL (Produção)
 ```bash
+# Tipo do banco de dados
+DB_TYPE=postgres
+
+# String de conexão completa
+DATABASE_URL="host=localhost user=youmeet password=youmeet dbname=youmeet port=5432 sslmode=disable"
+
+# Ou configuração individual
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=youmeet
+DB_PASSWORD=youmeet
+DB_NAME=youmeet
+DB_SSLMODE=disable
+```
+
+#### SQLite (Desenvolvimento/Testes)
+```bash
+# Tipo do banco de dados
+DB_TYPE=sqlite
+
+# Caminho do arquivo de banco
+DB_PATH=youmeet.db
+
+# Para testes em memória
+DB_PATH=:memory:
+```
+
+### Configuração do Servidor
+```bash
+# Porta do servidor (padrão: 8080)
 PORT=8080
-HOST=localhost
+
+# Ambiente de execução
+ENV=development  # development, staging, production
+
+# Nível de log
+LOG_LEVEL=info   # debug, info, warn, error
+```
+
+## Arquivos de Configuração
+
+### .env (Desenvolvimento)
+```bash
+# Database
+DB_TYPE=sqlite
+DB_PATH=youmeet.db
+
+# Server
+PORT=8080
+ENV=development
 LOG_LEVEL=debug
-DB_TYPE=memory
 ```
 
-**Production:**
+### .env.production (Produção)
 ```bash
-PORT=80
-HOST=0.0.0.0
-LOG_LEVEL=info
+# Database
 DB_TYPE=postgres
-DB_URL=postgres://user:pass@localhost/youmeet
-DB_MAX_CONNECTIONS=25
-API_TIMEOUT=10s
-```
+DATABASE_URL=postgres://user:password@localhost:5432/youmeet?sslmode=disable
 
-## Configuration Implementation
-
-### Recommended Configuration Structure
-
-Create `internal/config/config.go`:
-
-```go
-package config
-
-import (
-    "os"
-    "strconv"
-    "time"
-)
-
-type Config struct {
-    Server   ServerConfig
-    Database DatabaseConfig
-    Logging  LoggingConfig
-}
-
-type ServerConfig struct {
-    Port    int
-    Host    string
-    Timeout time.Duration
-}
-
-type DatabaseConfig struct {
-    Type           string
-    URL            string
-    MaxConnections int
-}
-
-type LoggingConfig struct {
-    Level string
-}
-
-func Load() *Config {
-    return &Config{
-        Server: ServerConfig{
-            Port:    getEnvInt("PORT", 8080),
-            Host:    getEnv("HOST", "localhost"),
-            Timeout: getEnvDuration("API_TIMEOUT", 30*time.Second),
-        },
-        Database: DatabaseConfig{
-            Type:           getEnv("DB_TYPE", "memory"),
-            URL:            getEnv("DB_URL", ""),
-            MaxConnections: getEnvInt("DB_MAX_CONNECTIONS", 10),
-        },
-        Logging: LoggingConfig{
-            Level: getEnv("LOG_LEVEL", "info"),
-        },
-    }
-}
-
-func getEnv(key, defaultValue string) string {
-    if value := os.Getenv(key); value != "" {
-        return value
-    }
-    return defaultValue
-}
-
-func getEnvInt(key string, defaultValue int) int {
-    if value := os.Getenv(key); value != "" {
-        if intValue, err := strconv.Atoi(value); err == nil {
-            return intValue
-        }
-    }
-    return defaultValue
-}
-
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-    if value := os.Getenv(key); value != "" {
-        if duration, err := time.ParseDuration(value); err == nil {
-            return duration
-        }
-    }
-    return defaultValue
-}
-```
-
-### Updated Main Function
-
-```go
-package main
-
-import (
-    "fmt"
-    "log"
-    "net/http"
-    "youmeet/internal/config"
-    // ... other imports
-)
-
-func main() {
-    cfg := config.Load()
-    
-    // Initialize components with config
-    repo := adapters.NewMemoryRepository()
-    appointmentService := application.NewAppointmentService(repo, repo)
-    handler := adapters.NewHTTPHandler(appointmentService)
-
-    r := mux.NewRouter()
-    r.HandleFunc("/appointments", handler.BookAppointment).Methods("POST")
-    r.HandleFunc("/appointments/{clientId}", handler.GetAppointments).Methods("GET")
-
-    addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-    log.Printf("Server starting on %s", addr)
-    log.Fatal(http.ListenAndServe(addr, r))
-}
-```
-
-## Database Configuration
-
-### Memory Storage (Current)
-
-**Configuration:**
-```go
-repo := adapters.NewMemoryRepository()
-```
-
-**Characteristics:**
-- No external dependencies
-- Fast access
-- No persistence
-- Limited scalability
-
-### PostgreSQL (Future)
-
-**Environment Variables:**
-```bash
-DB_TYPE=postgres
-DB_URL=postgres://username:password@localhost:5432/youmeet?sslmode=disable
-DB_MAX_CONNECTIONS=25
-```
-
-**Connection Example:**
-```go
-import (
-    "database/sql"
-    _ "github.com/lib/pq"
-)
-
-func NewPostgresRepository(cfg DatabaseConfig) (*PostgresRepository, error) {
-    db, err := sql.Open("postgres", cfg.URL)
-    if err != nil {
-        return nil, err
-    }
-    
-    db.SetMaxOpenConns(cfg.MaxConnections)
-    db.SetMaxIdleConns(cfg.MaxConnections / 2)
-    
-    return &PostgresRepository{db: db}, nil
-}
-```
-
-### MySQL (Future)
-
-**Environment Variables:**
-```bash
-DB_TYPE=mysql
-DB_URL=username:password@tcp(localhost:3306)/youmeet
-DB_MAX_CONNECTIONS=25
-```
-
-## Logging Configuration
-
-### Current Logging
-
-Uses standard Go log package:
-```go
-log.Println("Server starting on :8080")
-```
-
-### Structured Logging (Recommended)
-
-**Environment Variables:**
-```bash
+# Server
+PORT=8080
+ENV=production
 LOG_LEVEL=info
-LOG_FORMAT=json
 ```
 
-**Implementation with logrus:**
-```go
-import "github.com/sirupsen/logrus"
+## Configuração por Ambiente
 
-func setupLogging(cfg LoggingConfig) {
-    level, err := logrus.ParseLevel(cfg.Level)
-    if err != nil {
-        level = logrus.InfoLevel
-    }
-    
-    logrus.SetLevel(level)
-    logrus.SetFormatter(&logrus.JSONFormatter{})
-}
-```
+### Desenvolvimento Local
 
-## Security Configuration
-
-### HTTPS Configuration
-
-**Environment Variables:**
+1. **Copie o arquivo de exemplo:**
 ```bash
-TLS_CERT_FILE=/path/to/cert.pem
-TLS_KEY_FILE=/path/to/key.pem
-HTTPS_ENABLED=true
+cp .env.example .env
 ```
 
-**Implementation:**
-```go
-if cfg.HTTPS.Enabled {
-    log.Fatal(http.ListenAndServeTLS(addr, cfg.HTTPS.CertFile, cfg.HTTPS.KeyFile, r))
-} else {
-    log.Fatal(http.ListenAndServe(addr, r))
-}
-```
-
-### CORS Configuration
-
-**Environment Variables:**
+2. **Configure para SQLite:**
 ```bash
-CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com
-CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE
-CORS_ALLOWED_HEADERS=Content-Type,Authorization
+DB_TYPE=sqlite
+DB_PATH=youmeet.db
+PORT=8080
 ```
 
-## Monitoring Configuration
-
-### Health Check Endpoint
-
-**Configuration:**
+3. **Execute a aplicação:**
 ```bash
-HEALTH_CHECK_ENABLED=true
-HEALTH_CHECK_PATH=/health
+go run cmd/api/main.go
 ```
 
-**Implementation:**
-```go
-if cfg.HealthCheck.Enabled {
-    r.HandleFunc(cfg.HealthCheck.Path, handler.HealthCheck).Methods("GET")
-}
-```
+### Testes
 
-### Metrics Configuration
-
-**Environment Variables:**
+1. **Configure variáveis para teste:**
 ```bash
-METRICS_ENABLED=true
-METRICS_PATH=/metrics
-METRICS_PORT=9090
+export DB_TYPE=sqlite
+export DB_PATH=:memory:
+export ENV=test
 ```
 
-## Configuration Validation
-
-### Validation Function
-
-```go
-func (c *Config) Validate() error {
-    if c.Server.Port < 1 || c.Server.Port > 65535 {
-        return fmt.Errorf("invalid port: %d", c.Server.Port)
-    }
-    
-    if c.Database.Type == "postgres" && c.Database.URL == "" {
-        return fmt.Errorf("database URL required for postgres")
-    }
-    
-    return nil
-}
+2. **Execute os testes:**
+```bash
+go test ./...
 ```
 
-### Usage in Main
+### Produção
 
-```go
-func main() {
-    cfg := config.Load()
-    if err := cfg.Validate(); err != nil {
-        log.Fatalf("Configuration error: %v", err)
-    }
-    
-    // Continue with application startup
-}
-```
-
-## Configuration Files
-
-### YAML Configuration (Alternative)
-
-Create `config.yaml`:
-```yaml
-server:
-  port: 8080
-  host: localhost
-  timeout: 30s
-
-database:
-  type: memory
-  url: ""
-  max_connections: 10
-
-logging:
-  level: info
-```
-
-### JSON Configuration (Alternative)
-
-Create `config.json`:
-```json
-{
-  "server": {
-    "port": 8080,
-    "host": "localhost",
-    "timeout": "30s"
-  },
-  "database": {
-    "type": "memory",
-    "url": "",
-    "max_connections": 10
-  },
-  "logging": {
-    "level": "info"
-  }
-}
-```
-
-## Deployment Configurations
-
-### Docker Environment
-
+#### Docker
 ```dockerfile
-ENV PORT=8080
-ENV HOST=0.0.0.0
-ENV LOG_LEVEL=info
-ENV DB_TYPE=postgres
-ENV DB_URL=postgres://user:pass@db:5432/youmeet
+# Dockerfile
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+COPY . .
+RUN go build -o youmeet cmd/api/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/youmeet .
+CMD ["./youmeet"]
 ```
 
-### Kubernetes ConfigMap
-
+#### Docker Compose
 ```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: youmeet-config
-data:
-  PORT: "8080"
-  HOST: "0.0.0.0"
-  LOG_LEVEL: "info"
-  DB_TYPE: "postgres"
+# docker-compose.yml
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_TYPE=postgres
+      - DATABASE_URL=postgres://youmeet:youmeet@db:5432/youmeet?sslmode=disable
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=youmeet
+      - POSTGRES_USER=youmeet
+      - POSTGRES_PASSWORD=youmeet
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
 ```
 
-## Best Practices
+## Configuração de Banco de Dados
 
-1. **Use environment variables** for deployment-specific settings
-2. **Provide sensible defaults** for all configuration options
-3. **Validate configuration** at startup
-4. **Document all options** with examples
-5. **Use structured configuration** objects
-6. **Support multiple formats** (env vars, files)
-7. **Keep secrets separate** from regular configuration
-8. **Version configuration schema** for compatibility
+### PostgreSQL
+
+#### Instalação Local
+```bash
+# Ubuntu/Debian
+sudo apt-get install postgresql postgresql-contrib
+
+# macOS
+brew install postgresql
+
+# Windows
+# Baixe do site oficial: https://www.postgresql.org/download/windows/
+```
+
+#### Configuração
+```sql
+-- Conecte como superuser
+sudo -u postgres psql
+
+-- Crie o banco e usuário
+CREATE DATABASE youmeet;
+CREATE USER youmeet WITH PASSWORD 'youmeet';
+GRANT ALL PRIVILEGES ON DATABASE youmeet TO youmeet;
+```
+
+#### String de Conexão
+```bash
+DATABASE_URL="postgres://youmeet:youmeet@localhost:5432/youmeet?sslmode=disable"
+```
+
+### SQLite
+
+#### Vantagens para Desenvolvimento
+- **Sem instalação**: Incluído no Go
+- **Arquivo único**: Fácil backup e reset
+- **Performance**: Rápido para desenvolvimento
+- **Portabilidade**: Funciona em qualquer OS
+
+#### Configuração
+```bash
+# Arquivo local
+DB_PATH=youmeet.db
+
+# Em memória (testes)
+DB_PATH=:memory:
+```
+
+## Configuração de Logs
+
+### Níveis de Log
+- **debug**: Informações detalhadas para debugging
+- **info**: Informações gerais sobre operações
+- **warn**: Avisos sobre situações não ideais
+- **error**: Erros que precisam de atenção
+
+### Configuração
+```bash
+# Desenvolvimento
+LOG_LEVEL=debug
+
+# Produção
+LOG_LEVEL=info
+```
+
+## Configuração de CORS
+
+Para desenvolvimento frontend:
+
+```go
+// cmd/api/main.go
+import "github.com/gin-contrib/cors"
+
+func main() {
+    r := gin.Default()
+    
+    // CORS middleware
+    r.Use(cors.New(cors.Config{
+        AllowOrigins:     []string{"http://localhost:3000"},
+        AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+        AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+        ExposeHeaders:    []string{"Content-Length"},
+        AllowCredentials: true,
+    }))
+    
+    // ... resto da configuração
+}
+```
+
+## Configuração de Segurança
+
+### JWT (Futuro)
+```bash
+# Chave secreta para JWT
+JWT_SECRET=sua-chave-secreta-muito-segura
+
+# Tempo de expiração
+JWT_EXPIRATION=24h
+```
+
+### Rate Limiting
+```bash
+# Requests por minuto por IP
+RATE_LIMIT=100
+
+# Burst size
+RATE_BURST=10
+```
+
+## Monitoramento
+
+### Health Check
+```bash
+# Endpoint de saúde
+curl http://localhost:8080/health
+```
+
+### Métricas
+```bash
+# Endpoint de métricas (Prometheus)
+curl http://localhost:8080/metrics
+```
+
+## Troubleshooting
+
+### Problemas Comuns
+
+#### Erro de Conexão com Banco
+```bash
+# Verifique se o PostgreSQL está rodando
+sudo systemctl status postgresql
+
+# Teste a conexão
+psql -h localhost -U youmeet -d youmeet
+```
+
+#### Porta em Uso
+```bash
+# Encontre o processo usando a porta
+lsof -i :8080
+
+# Mate o processo
+kill -9 <PID>
+```
+
+#### Permissões de Arquivo (SQLite)
+```bash
+# Verifique permissões
+ls -la youmeet.db
+
+# Corrija permissões
+chmod 664 youmeet.db
+```
+
+### Logs de Debug
+
+```bash
+# Execute com logs detalhados
+LOG_LEVEL=debug go run cmd/api/main.go
+
+# Ou com variável de ambiente
+export LOG_LEVEL=debug
+go run cmd/api/main.go
+```

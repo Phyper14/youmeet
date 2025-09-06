@@ -62,14 +62,14 @@ O servidor iniciará em `http://localhost:8080`
 
 ## Documentação
 
-Documentação detalhada disponível na pasta `documentation/`:
+Documentação completa disponível na pasta `documentation/`:
 
-- [Documentação da API](documentation/api.md)
-- [Guia de Arquitetura](documentation/architecture.md)
-- [Guia do Desenvolvedor](documentation/developer-guide.md)
-- [Guia de Configuração](documentation/configuration.md)
-- [Guia de Deploy](documentation/deployment.md)
-- [Guia de Testes](documentation/testing.md)
+- 📚 [**API Documentation**](documentation/api.md) - Endpoints, requests e responses
+- 🏗️ [**Architecture Guide**](documentation/architecture.md) - Arquitetura hexagonal e princípios
+- 👨‍💻 [**Developer Guide**](documentation/developer-guide.md) - Como contribuir e desenvolver
+- ⚙️ [**Configuration Guide**](documentation/configuration.md) - Configuração de ambiente e banco
+- 🚀 [**Deployment Guide**](documentation/deployment.md) - Deploy local, Docker e nuvem
+- 🧪 [**Testing Guide**](documentation/testing.md) - Estratégias e exemplos de testes
 
 ## Estrutura do Projeto
 

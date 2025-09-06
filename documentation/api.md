@@ -1,8 +1,8 @@
-# API Documentation
+# API Documentation - YouMeet
 
-## Overview
+## Visão Geral
 
-YouMeet provides a RESTful API for managing appointments and services. All endpoints accept and return JSON data.
+A API YouMeet é uma RESTful API construída em Go que permite o gerenciamento completo de agendamentos para prestadores de serviços.
 
 ## Base URL
 
@@ -10,132 +10,161 @@ YouMeet provides a RESTful API for managing appointments and services. All endpo
 http://localhost:8080
 ```
 
-## Endpoints
+## Autenticação
 
-### Book Appointment
+### POST /auth/register
 
-Books a new appointment for a client.
-
-**Endpoint:** `POST /appointments`
+Registra um novo usuário no sistema.
 
 **Request Body:**
 ```json
 {
-  "service_id": "uuid",
-  "client_id": "uuid", 
-  "start_time": "2024-01-15T10:00:00Z"
+  "name": "João Silva",
+  "email": "joao@email.com",
+  "password": "senha123",
+  "role": "client"
 }
 ```
 
-**Response:**
+**Roles disponíveis:**
+- `client` - Cliente que agenda serviços
+- `company` - Empresa que oferece serviços
+- `professional` - Profissional autônomo
+
+**Response (201):**
 ```json
 {
-  "id": "uuid",
-  "service_id": "uuid",
-  "client_id": "uuid",
-  "start_time": "2024-01-15T10:00:00Z",
-  "status": "scheduled"
+  "message": "Usuário criado com sucesso",
+  "user": {
+    "id": "uuid",
+    "name": "João Silva",
+    "email": "joao@email.com",
+    "role": "client"
+  }
 }
 ```
 
-**Status Codes:**
-- `200 OK` - Appointment booked successfully
-- `400 Bad Request` - Invalid request body or parameters
-- `500 Internal Server Error` - Server error
+### POST /auth/login
 
-**Example:**
+Autentica um usuário existente.
+
+**Request Body:**
+```json
+{
+  "email": "joao@email.com",
+  "password": "senha123"
+}
+```
+
+**Response (200):**
+```json
+{
+  "token": "auth-token-uuid",
+  "user": {
+    "id": "uuid",
+    "name": "João Silva",
+    "email": "joao@email.com",
+    "role": "client"
+  }
+}
+```
+
+## Agendamentos
+
+### POST /appointments
+
+Cria um novo agendamento.
+
+**Request Body:**
+```json
+{
+  "client_id": "client-uuid",
+  "professional_id": "professional-uuid",
+  "service_id": "service-uuid",
+  "start_time": "2024-01-15T10:00:00Z",
+  "end_time": "2024-01-15T11:00:00Z"
+}
+```
+
+**Response (201):**
+```json
+{
+  "message": "Agendamento criado com sucesso",
+  "appointment": {
+    "id": "appointment-uuid",
+    "client_id": "client-uuid",
+    "professional_id": "professional-uuid",
+    "service_id": "service-uuid",
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T11:00:00Z",
+    "status": "scheduled"
+  }
+}
+```
+
+### GET /appointments/{clientId}
+
+Lista todos os agendamentos de um cliente.
+
+**Response (200):**
+```json
+{
+  "appointments": [
+    {
+      "id": "appointment-uuid",
+      "client_id": "client-uuid",
+      "professional_id": "professional-uuid",
+      "service_id": "service-uuid",
+      "start_time": "2024-01-15T10:00:00Z",
+      "end_time": "2024-01-15T11:00:00Z",
+      "status": "scheduled"
+    }
+  ]
+}
+```
+
+## Códigos de Status
+
+- `200` - OK
+- `201` - Created
+- `400` - Bad Request
+- `401` - Unauthorized
+- `404` - Not Found
+- `500` - Internal Server Error
+
+## Exemplos de Uso
+
+### Registrar um cliente
+```bash
+curl -X POST http://localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Maria Santos",
+    "email": "maria@email.com",
+    "password": "senha123",
+    "role": "client"
+  }'
+```
+
+### Fazer login
+```bash
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "maria@email.com",
+    "password": "senha123"
+  }'
+```
+
+### Criar agendamento
 ```bash
 curl -X POST http://localhost:8080/appointments \
   -H "Content-Type: application/json" \
   -d '{
-    "service_id": "123e4567-e89b-12d3-a456-426614174000",
-    "client_id": "987fcdeb-51a2-43d1-9c4b-123456789abc",
-    "start_time": "2024-01-15T10:00:00Z"
+    "client_id": "client-uuid",
+    "professional_id": "professional-uuid",
+    "service_id": "service-uuid",
+    "start_time": "2024-01-15T10:00:00Z",
+    "end_time": "2024-01-15T11:00:00Z"
   }'
 ```
-
-### Get Appointments
-
-Retrieves all appointments for a specific client.
-
-**Endpoint:** `GET /appointments/{clientId}`
-
-**Path Parameters:**
-- `clientId` (string, required) - UUID of the client
-
-**Response:**
-```json
-[
-  {
-    "id": "uuid",
-    "service_id": "uuid",
-    "client_id": "uuid",
-    "start_time": "2024-01-15T10:00:00Z",
-    "status": "scheduled"
-  }
-]
-```
-
-**Status Codes:**
-- `200 OK` - Appointments retrieved successfully
-- `400 Bad Request` - Invalid client ID format
-- `500 Internal Server Error` - Server error
-
-**Example:**
-```bash
-curl http://localhost:8080/appointments/987fcdeb-51a2-43d1-9c4b-123456789abc
-```
-
-## Data Models
-
-### Appointment
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Unique appointment identifier |
-| service_id | UUID | ID of the booked service |
-| client_id | UUID | ID of the client |
-| start_time | DateTime | Appointment start time (RFC3339 format) |
-| status | String | Appointment status (e.g., "scheduled") |
-
-### Service
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Unique service identifier |
-| name | String | Service name |
-| duration | Duration | Service duration |
-| price | Float64 | Service price |
-| provider_id | UUID | ID of the service provider |
-
-### User
-
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Unique user identifier |
-| name | String | User's full name |
-| email | String | User's email address |
-
-## Error Handling
-
-All errors return a JSON response with an error message:
-
-```json
-{
-  "error": "Error description"
-}
-```
-
-Common error scenarios:
-- Invalid UUID format in path parameters
-- Missing required fields in request body
-- Invalid date format for start_time (must be RFC3339)
-- Internal server errors
-
-## Date Format
-
-All datetime fields use RFC3339 format: `2006-01-02T15:04:05Z07:00`
-
-Examples:
-- `2024-01-15T10:00:00Z` (UTC)
-- `2024-01-15T10:00:00-05:00` (EST)

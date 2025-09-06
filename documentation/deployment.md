@@ -1,65 +1,49 @@
-# Deployment Guide
+# Deploy - YouMeet
 
-## Overview
+## Visão Geral
 
-This guide covers various deployment options for the YouMeet application, from local development to production environments.
+Este guia cobre diferentes estratégias de deploy para a aplicação YouMeet, desde desenvolvimento local até produção em nuvem.
 
-## Prerequisites
+## Deploy Local
 
-- Go 1.21 or higher
-- Git
-- Docker (for containerized deployments)
-- Access to target deployment environment
-
-## Local Deployment
-
-### Development Server
-
-**Quick start:**
+### Desenvolvimento
 ```bash
-go run cmd/main.go
+# Clone o repositório
+git clone https://github.com/Phyper14/youmeet.git
+cd youmeet
+
+# Configure ambiente
+export DB_TYPE=sqlite
+export DB_PATH=youmeet.db
+
+# Execute
+go run cmd/api/main.go
 ```
 
-**Build and run:**
+### Build Local
 ```bash
-go build -o youmeet cmd/main.go
-./youmeet
+# Build para o sistema atual
+go build -o bin/youmeet cmd/api/main.go
+
+# Execute o binário
+./bin/youmeet
 ```
 
-**With custom port:**
-```bash
-PORT=3000 go run cmd/main.go
-```
-
-### Production Build
-
-**Linux/macOS:**
-```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o youmeet cmd/main.go
-```
-
-**Windows:**
-```bash
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o youmeet.exe cmd/main.go
-```
-
-**Cross-platform builds:**
+### Cross-compilation
 ```bash
 # Linux
-GOOS=linux GOARCH=amd64 go build -o youmeet-linux cmd/main.go
-
-# macOS
-GOOS=darwin GOARCH=amd64 go build -o youmeet-macos cmd/main.go
+GOOS=linux GOARCH=amd64 go build -o bin/youmeet-linux cmd/api/main.go
 
 # Windows
-GOOS=windows GOARCH=amd64 go build -o youmeet-windows.exe cmd/main.go
+GOOS=windows GOARCH=amd64 go build -o bin/youmeet.exe cmd/api/main.go
+
+# macOS
+GOOS=darwin GOARCH=amd64 go build -o bin/youmeet-macos cmd/api/main.go
 ```
 
-## Docker Deployment
+## Docker
 
 ### Dockerfile
-
-Create `Dockerfile` in project root:
 ```dockerfile
 # Build stage
 FROM golang:1.21-alpine AS builder
@@ -69,12 +53,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o youmeet cmd/main.go
+RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o youmeet cmd/api/main.go
 
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates sqlite
 WORKDIR /root/
 
 COPY --from=builder /app/youmeet .
@@ -84,83 +68,139 @@ EXPOSE 8080
 CMD ["./youmeet"]
 ```
 
-### Docker Commands
-
-**Build image:**
+### Build e Run
 ```bash
+# Build da imagem
 docker build -t youmeet:latest .
-```
 
-**Run container:**
-```bash
-docker run -p 8080:8080 youmeet:latest
-```
-
-**Run with environment variables:**
-```bash
+# Run com SQLite
 docker run -p 8080:8080 \
-  -e PORT=8080 \
-  -e LOG_LEVEL=info \
+  -e DB_TYPE=sqlite \
+  -e DB_PATH=/data/youmeet.db \
+  -v $(pwd)/data:/data \
+  youmeet:latest
+
+# Run com PostgreSQL
+docker run -p 8080:8080 \
+  -e DB_TYPE=postgres \
+  -e DATABASE_URL="postgres://user:pass@host:5432/dbname" \
   youmeet:latest
 ```
 
-### Docker Compose
+## Docker Compose
 
-Create `docker-compose.yml`:
+### Desenvolvimento
 ```yaml
+# docker-compose.dev.yml
 version: '3.8'
 
 services:
-  youmeet:
+  app:
     build: .
     ports:
       - "8080:8080"
     environment:
-      - PORT=8080
-      - LOG_LEVEL=info
+      - DB_TYPE=sqlite
+      - DB_PATH=/data/youmeet.db
+      - ENV=development
+    volumes:
+      - ./data:/data
+      - .:/app
+    command: go run cmd/api/main.go
+```
+
+### Produção
+```yaml
+# docker-compose.prod.yml
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_TYPE=postgres
+      - DATABASE_URL=postgres://youmeet:${DB_PASSWORD}@db:5432/youmeet?sslmode=disable
+      - ENV=production
+    depends_on:
+      - db
     restart: unless-stopped
 
-  # Future: Add database service
-  # postgres:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_DB: youmeet
-  #     POSTGRES_USER: youmeet
-  #     POSTGRES_PASSWORD: password
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=youmeet
+      - POSTGRES_USER=youmeet
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
-# volumes:
-#   postgres_data:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
 ```
 
-**Run with Docker Compose:**
+### Comandos
 ```bash
-docker-compose up -d
+# Desenvolvimento
+docker-compose -f docker-compose.dev.yml up
+
+# Produção
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
-## Cloud Deployments
+## Deploy em Nuvem
 
-### AWS Deployment
+### Heroku
 
-#### AWS ECS (Elastic Container Service)
-
-**1. Build and push to ECR:**
+#### Preparação
 ```bash
-# Create ECR repository
-aws ecr create-repository --repository-name youmeet
+# Instale Heroku CLI
+# https://devcenter.heroku.com/articles/heroku-cli
 
-# Get login token
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+# Login
+heroku login
 
-# Tag and push image
-docker tag youmeet:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest
+# Crie a aplicação
+heroku create youmeet-app
 ```
 
-**2. Create ECS task definition:**
+#### Configuração
+```bash
+# Configure variáveis de ambiente
+heroku config:set DB_TYPE=postgres
+heroku config:set ENV=production
+
+# Adicione PostgreSQL
+heroku addons:create heroku-postgresql:hobby-dev
+```
+
+#### Deploy
+```bash
+# Deploy via Git
+git push heroku main
+
+# Ou via Container Registry
+heroku container:push web
+heroku container:release web
+```
+
+### AWS ECS
+
+#### Task Definition
 ```json
 {
   "family": "youmeet",
@@ -168,11 +208,11 @@ docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::account:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "youmeet",
-      "image": "<account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest",
+      "image": "youmeet:latest",
       "portMappings": [
         {
           "containerPort": 8080,
@@ -181,8 +221,12 @@ docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest
       ],
       "environment": [
         {
-          "name": "PORT",
-          "value": "8080"
+          "name": "DB_TYPE",
+          "value": "postgres"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgres://user:pass@rds-endpoint:5432/youmeet"
         }
       ],
       "logConfiguration": {
@@ -198,357 +242,192 @@ docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/youmeet:latest
 }
 ```
 
-#### AWS Lambda (Serverless)
+### Google Cloud Run
 
-**1. Install AWS Lambda Go runtime:**
+#### Preparação
 ```bash
-go get github.com/aws/aws-lambda-go/lambda
+# Configure gcloud
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+
+# Build e push para Container Registry
+docker build -t gcr.io/YOUR_PROJECT_ID/youmeet .
+docker push gcr.io/YOUR_PROJECT_ID/youmeet
 ```
 
-**2. Create Lambda handler:**
-```go
-package main
-
-import (
-    "context"
-    "github.com/aws/aws-lambda-go/events"
-    "github.com/aws/aws-lambda-go/lambda"
-    "github.com/awslabs/aws-lambda-go-api-proxy/gorillamux"
-)
-
-func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-    // Initialize your router here
-    r := setupRouter()
-    adapter := gorillamux.New(r)
-    return adapter.ProxyWithContext(ctx, req)
-}
-
-func main() {
-    lambda.Start(handler)
-}
-```
-
-### Google Cloud Platform
-
-#### Cloud Run
-
-**1. Build and deploy:**
+#### Deploy
 ```bash
-gcloud builds submit --tag gcr.io/PROJECT-ID/youmeet
-gcloud run deploy --image gcr.io/PROJECT-ID/youmeet --platform managed
+# Deploy para Cloud Run
+gcloud run deploy youmeet \
+  --image gcr.io/YOUR_PROJECT_ID/youmeet \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-env-vars DB_TYPE=postgres,DATABASE_URL="postgres://..."
 ```
 
-**2. Using Cloud Build:**
+### DigitalOcean App Platform
 
-Create `cloudbuild.yaml`:
+#### app.yaml
 ```yaml
-steps:
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/youmeet', '.']
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/$PROJECT_ID/youmeet']
-- name: 'gcr.io/cloud-builders/gcloud'
-  args: ['run', 'deploy', 'youmeet', '--image', 'gcr.io/$PROJECT_ID/youmeet', '--region', 'us-central1', '--platform', 'managed']
+name: youmeet
+services:
+- name: api
+  source_dir: /
+  github:
+    repo: Phyper14/youmeet
+    branch: main
+  run_command: ./youmeet
+  environment_slug: go
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  envs:
+  - key: DB_TYPE
+    value: postgres
+  - key: DATABASE_URL
+    value: ${db.DATABASE_URL}
+
+databases:
+- name: db
+  engine: PG
+  version: "13"
+  size: db-s-dev-database
 ```
 
-### Microsoft Azure
+## Configuração de Proxy Reverso
 
-#### Azure Container Instances
-
-```bash
-az container create \
-  --resource-group myResourceGroup \
-  --name youmeet \
-  --image youmeet:latest \
-  --dns-name-label youmeet-app \
-  --ports 8080
-```
-
-#### Azure App Service
-
-```bash
-az webapp create \
-  --resource-group myResourceGroup \
-  --plan myAppServicePlan \
-  --name youmeet-app \
-  --deployment-container-image-name youmeet:latest
-```
-
-## Kubernetes Deployment
-
-### Deployment Manifest
-
-Create `k8s/deployment.yaml`:
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: youmeet
-  labels:
-    app: youmeet
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: youmeet
-  template:
-    metadata:
-      labels:
-        app: youmeet
-    spec:
-      containers:
-      - name: youmeet
-        image: youmeet:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: PORT
-          value: "8080"
-        - name: LOG_LEVEL
-          value: "info"
-        resources:
-          requests:
-            memory: "64Mi"
-            cpu: "250m"
-          limits:
-            memory: "128Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-```
-
-### Service Manifest
-
-Create `k8s/service.yaml`:
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: youmeet-service
-spec:
-  selector:
-    app: youmeet
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8080
-  type: LoadBalancer
-```
-
-### ConfigMap
-
-Create `k8s/configmap.yaml`:
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: youmeet-config
-data:
-  PORT: "8080"
-  LOG_LEVEL: "info"
-  DB_TYPE: "memory"
-```
-
-### Deploy to Kubernetes
-
-```bash
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
-```
-
-## Monitoring and Logging
-
-### Health Check Endpoint
-
-Add to your application:
-```go
-func (h *HTTPHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    json.NewEncoder(w).Encode(map[string]string{
-        "status": "healthy",
-        "timestamp": time.Now().UTC().Format(time.RFC3339),
-    })
-}
-```
-
-### Prometheus Metrics
-
-**1. Add Prometheus dependency:**
-```bash
-go get github.com/prometheus/client_golang/prometheus
-go get github.com/prometheus/client_golang/prometheus/promhttp
-```
-
-**2. Add metrics endpoint:**
-```go
-import (
-    "github.com/prometheus/client_golang/prometheus/promhttp"
-)
-
-func main() {
-    // ... existing code
-    
-    r.Handle("/metrics", promhttp.Handler())
-    
-    // ... rest of main function
-}
-```
-
-### Structured Logging
-
-**Using logrus:**
-```bash
-go get github.com/sirupsen/logrus
-```
-
-```go
-import "github.com/sirupsen/logrus"
-
-func init() {
-    logrus.SetFormatter(&logrus.JSONFormatter{})
-    logrus.SetLevel(logrus.InfoLevel)
-}
-```
-
-## Environment-Specific Configurations
-
-### Development
-
-```bash
-export PORT=8080
-export LOG_LEVEL=debug
-export DB_TYPE=memory
-```
-
-### Staging
-
-```bash
-export PORT=8080
-export LOG_LEVEL=info
-export DB_TYPE=postgres
-export DB_URL=postgres://user:pass@staging-db:5432/youmeet
-```
-
-### Production
-
-```bash
-export PORT=80
-export LOG_LEVEL=warn
-export DB_TYPE=postgres
-export DB_URL=postgres://user:pass@prod-db:5432/youmeet
-export DB_MAX_CONNECTIONS=25
-```
-
-## Security Considerations
-
-### HTTPS/TLS
-
-**Using Let's Encrypt with reverse proxy:**
+### Nginx
 ```nginx
+# nginx.conf
+upstream youmeet {
+    server app:8080;
+}
+
 server {
-    listen 443 ssl;
+    listen 80;
     server_name yourdomain.com;
-    
-    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-    
+
     location / {
-        proxy_pass http://localhost:8080;
+        proxy_pass http://youmeet;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTPS (com SSL)
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com;
+
+    ssl_certificate /etc/nginx/ssl/cert.pem;
+    ssl_certificate_key /etc/nginx/ssl/key.pem;
+
+    location / {
+        proxy_pass http://youmeet;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-### Firewall Rules
+### Traefik
+```yaml
+# docker-compose.yml com Traefik
+version: '3.8'
 
-**Allow only necessary ports:**
-```bash
-# Allow HTTP/HTTPS
-sudo ufw allow 80
-sudo ufw allow 443
+services:
+  traefik:
+    image: traefik:v2.9
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
-# Allow SSH (if needed)
-sudo ufw allow 22
-
-# Block application port from external access
-sudo ufw deny 8080
+  app:
+    build: .
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.youmeet.rule=Host(`yourdomain.com`)"
+      - "traefik.http.services.youmeet.loadbalancer.server.port=8080"
 ```
 
-## Backup and Recovery
+## Monitoramento e Logs
 
-### Database Backup (Future)
+### Health Check
+```go
+// Adicione ao main.go
+r.GET("/health", func(c *gin.Context) {
+    c.JSON(200, gin.H{
+        "status": "healthy",
+        "timestamp": time.Now(),
+    })
+})
+```
 
+### Logs Estruturados
 ```bash
-# PostgreSQL backup
+# Configure logs em JSON para produção
+export LOG_FORMAT=json
+export LOG_LEVEL=info
+```
+
+### Prometheus Metrics
+```go
+// Adicione métricas
+import "github.com/prometheus/client_golang/prometheus/promhttp"
+
+r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+```
+
+## Backup e Recuperação
+
+### PostgreSQL
+```bash
+# Backup
 pg_dump -h localhost -U youmeet youmeet > backup.sql
 
 # Restore
 psql -h localhost -U youmeet youmeet < backup.sql
 ```
 
-### Application State
-
-Since the current implementation uses in-memory storage, consider:
-- Implementing persistent storage
-- Regular data exports
-- State replication across instances
-
-## Troubleshooting
-
-### Common Issues
-
-**Port already in use:**
+### SQLite
 ```bash
-# Find process using port
-lsof -i :8080
-# Kill process
-kill -9 <PID>
+# Backup
+cp youmeet.db backup_$(date +%Y%m%d_%H%M%S).db
+
+# Restore
+cp backup_20240115_120000.db youmeet.db
 ```
 
-**Memory issues:**
+## Segurança
+
+### Variáveis de Ambiente Sensíveis
 ```bash
-# Check memory usage
-docker stats
-# Increase container memory limits
+# Use secrets management
+export DATABASE_URL=$(cat /run/secrets/database_url)
+export JWT_SECRET=$(cat /run/secrets/jwt_secret)
 ```
 
-**Container won't start:**
+### HTTPS
 ```bash
-# Check logs
-docker logs <container-id>
-# Check container status
-docker ps -a
+# Let's Encrypt com Certbot
+certbot --nginx -d yourdomain.com
 ```
 
-### Debugging
-
-**Enable debug logging:**
+### Firewall
 ```bash
-LOG_LEVEL=debug ./youmeet
-```
-
-**Check application health:**
-```bash
-curl http://localhost:8080/health
-```
-
-**Monitor resource usage:**
-```bash
-# CPU and memory
-top
-# Network connections
-netstat -tulpn
+# UFW (Ubuntu)
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
 ```

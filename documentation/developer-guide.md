@@ -1,339 +1,326 @@
-# Developer Guide
+# Guia do Desenvolvedor - YouMeet
 
-## Development Setup
+## Configuração do Ambiente de Desenvolvimento
 
-### Prerequisites
+### Pré-requisitos
 
-- **Go**: Version 1.21 or higher
-- **Git**: For version control
-- **IDE**: VS Code, GoLand, or any Go-compatible editor
+- **Go 1.21+**
+- **Git**
+- **PostgreSQL** (opcional, para produção)
+- **SQLite** (incluído, para desenvolvimento)
 
-### Environment Setup
+### Instalação
 
-1. **Clone the repository:**
+1. **Clone o repositório:**
 ```bash
-git clone <repository-url>
+git clone https://github.com/Phyper14/youmeet.git
 cd youmeet
 ```
 
-2. **Install dependencies:**
+2. **Instale as dependências:**
 ```bash
 go mod download
 ```
 
-3. **Verify setup:**
+3. **Configure as variáveis de ambiente:**
 ```bash
-go build ./cmd/main.go
+# Para desenvolvimento com SQLite
+export DB_TYPE=sqlite
+export DB_PATH=youmeet.db
+
+# Para produção com PostgreSQL
+export DB_TYPE=postgres
+export DATABASE_URL="host=localhost user=youmeet password=youmeet dbname=youmeet port=5432 sslmode=disable"
 ```
 
-## Development Workflow
-
-### Running the Application
-
-**Development mode:**
+4. **Execute a aplicação:**
 ```bash
-go run cmd/main.go
+go run cmd/api/main.go
 ```
 
-**Build and run:**
+## Estrutura de Desenvolvimento
+
+### Adicionando um Novo Domínio
+
+1. **Crie a estrutura de domínio:**
 ```bash
-go build -o youmeet cmd/main.go
-./youmeet
+mkdir -p internal/core/domain/novo_dominio
 ```
 
-### Testing
+2. **Defina as entidades:**
+```go
+// internal/core/domain/novo_dominio/entidade.go
+package novo_dominio
 
-**Run all tests:**
+import (
+    "time"
+    "github.com/google/uuid"
+)
+
+type MinhaEntidade struct {
+    ID        uuid.UUID `json:"id" gorm:"primaryKey;type:uuid"`
+    Nome      string    `json:"nome" gorm:"not null"`
+    CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+```
+
+3. **Defina as interfaces (portas):**
+```go
+// internal/core/domain/novo_dominio/repository.go
+package novo_dominio
+
+import (
+    "context"
+    "github.com/google/uuid"
+)
+
+type Repository interface {
+    Create(ctx context.Context, entity *MinhaEntidade) error
+    GetByID(ctx context.Context, id uuid.UUID) (*MinhaEntidade, error)
+}
+```
+
+### Implementando um Repository
+
+1. **Crie o repository:**
+```go
+// internal/adapters/repositories/minha_entidade_repository.go
+package repositories
+
+import (
+    "context"
+    "github.com/google/uuid"
+    "youmeet/internal/core/domain/novo_dominio"
+)
+
+type MinhaEntidadeRepository struct {
+    db DBClient
+}
+
+func NewMinhaEntidadeRepository(db DBClient) *MinhaEntidadeRepository {
+    return &MinhaEntidadeRepository{db: db}
+}
+
+func (r *MinhaEntidadeRepository) Create(ctx context.Context, entity *novo_dominio.MinhaEntidade) error {
+    return r.db.Create(entity)
+}
+
+func (r *MinhaEntidadeRepository) GetByID(ctx context.Context, id uuid.UUID) (*novo_dominio.MinhaEntidade, error) {
+    var entity novo_dominio.MinhaEntidade
+    err := r.db.First(&entity, "id = ?", id)
+    return &entity, err
+}
+```
+
+### Criando um Service
+
+1. **Implemente a lógica de negócio:**
+```go
+// internal/core/services/minha_entidade_service.go
+package services
+
+import (
+    "context"
+    "github.com/google/uuid"
+    "youmeet/internal/core/domain/novo_dominio"
+)
+
+type MinhaEntidadeService struct {
+    repo novo_dominio.Repository
+}
+
+func NewMinhaEntidadeService(repo novo_dominio.Repository) *MinhaEntidadeService {
+    return &MinhaEntidadeService{repo: repo}
+}
+
+func (s *MinhaEntidadeService) CriarEntidade(ctx context.Context, nome string) (*novo_dominio.MinhaEntidade, error) {
+    entity := &novo_dominio.MinhaEntidade{
+        ID:   uuid.New(),
+        Nome: nome,
+    }
+    
+    err := s.repo.Create(ctx, entity)
+    return entity, err
+}
+```
+
+### Adicionando um Handler
+
+1. **Crie a estrutura do handler:**
 ```bash
+mkdir -p internal/adapters/handlers/minha_entidade_handler
+```
+
+2. **Implemente o handler:**
+```go
+// internal/adapters/handlers/minha_entidade_handler/handler.go
+package minha_entidade_handler
+
+import (
+    "net/http"
+    "github.com/gin-gonic/gin"
+    "youmeet/internal/core/services"
+)
+
+type Handler struct {
+    service *services.MinhaEntidadeService
+}
+
+func NewHandler(service *services.MinhaEntidadeService) *Handler {
+    return &Handler{service: service}
+}
+
+func (h *Handler) Create(c *gin.Context) {
+    var req CreateRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+
+    entity, err := h.service.CriarEntidade(c.Request.Context(), req.Nome)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+
+    c.JSON(http.StatusCreated, gin.H{"entity": entity})
+}
+```
+
+3. **Defina os DTOs:**
+```go
+// internal/adapters/handlers/minha_entidade_handler/dto.go
+package minha_entidade_handler
+
+type CreateRequest struct {
+    Nome string `json:"nome" binding:"required"`
+}
+```
+
+## Padrões de Código
+
+### Nomenclatura
+
+- **Packages**: snake_case (ex: `user_repository`)
+- **Types**: PascalCase (ex: `UserRepository`)
+- **Functions**: PascalCase para públicas, camelCase para privadas
+- **Variables**: camelCase
+- **Constants**: UPPER_CASE
+
+### Estrutura de Arquivos
+
+```
+domain_name/
+├── entity.go      # Entidades do domínio
+└── repository.go  # Interfaces (portas)
+
+handler_name/
+├── handler.go     # Lógica do handler
+└── dto.go         # Data Transfer Objects
+```
+
+### Tratamento de Erros
+
+```go
+// Sempre retorne erros específicos
+func (s *Service) DoSomething() error {
+    if err := s.repo.Save(); err != nil {
+        return fmt.Errorf("failed to save: %w", err)
+    }
+    return nil
+}
+
+// Use contexto para cancelamento
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*Entity, error) {
+    // implementação
+}
+```
+
+## Testes
+
+### Testes Unitários
+
+```go
+// internal/core/services/auth_service_test.go
+package services_test
+
+import (
+    "context"
+    "testing"
+    "youmeet/internal/core/services"
+    "youmeet/internal/mocks"
+)
+
+func TestAuthService_Register(t *testing.T) {
+    mockRepo := &mocks.UserRepository{}
+    service := services.NewAuthService(mockRepo, nil, nil)
+    
+    // Test implementation
+}
+```
+
+### Executar Testes
+
+```bash
+# Todos os testes
 go test ./...
-```
 
-**Run tests with coverage:**
-```bash
+# Testes com coverage
 go test -cover ./...
+
+# Testes específicos
+go test ./internal/core/services/
 ```
 
-**Run tests with verbose output:**
-```bash
-go test -v ./...
-```
+## Comandos Úteis
 
-### Code Quality
+### Desenvolvimento
 
-**Format code:**
 ```bash
+# Executar aplicação
+go run cmd/api/main.go
+
+# Build
+go build -o bin/youmeet cmd/api/main.go
+
+# Formatar código
 go fmt ./...
-```
 
-**Lint code:**
-```bash
+# Verificar dependências
+go mod tidy
+
+# Verificar código
 go vet ./...
 ```
 
-**Static analysis (if golangci-lint is installed):**
-```bash
-golangci-lint run
-```
-
-## Project Structure
-
-```
-youmeet/
-├── cmd/                    # Application entry points
-│   └── main.go            # Main application
-├── internal/              # Private application code
-│   ├── adapters/          # External adapters
-│   │   ├── http_handler.go    # HTTP REST API
-│   │   └── memory_repository.go # In-memory storage
-│   ├── application/       # Application services
-│   │   └── appointment_service.go
-│   ├── domain/           # Domain entities
-│   │   └── entities.go
-│   └── ports/            # Interface definitions
-│       ├── repositories.go
-│       └── services.go
-├── documentation/         # Project documentation
-├── go.mod                # Go module definition
-├── go.sum                # Go module checksums
-└── README.md             # Project overview
-```
-
-## Coding Standards
-
-### Go Conventions
-
-- Follow standard Go formatting (`go fmt`)
-- Use meaningful variable and function names
-- Write clear, concise comments for exported functions
-- Keep functions small and focused
-- Use interfaces for abstraction
-
-### Architecture Guidelines
-
-1. **Domain Layer**:
-   - Keep business logic pure
-   - No external dependencies
-   - Focus on business rules
-
-2. **Application Layer**:
-   - Orchestrate domain entities
-   - Implement use cases
-   - Depend only on ports
-
-3. **Adapters Layer**:
-   - Implement port interfaces
-   - Handle external system concerns
-   - Convert between formats
-
-4. **Ports Layer**:
-   - Define clear interfaces
-   - Keep interfaces small and focused
-   - Use dependency inversion
-
-### Naming Conventions
-
-- **Packages**: lowercase, single word when possible
-- **Files**: snake_case for multi-word names
-- **Types**: PascalCase
-- **Functions**: PascalCase for exported, camelCase for private
-- **Variables**: camelCase
-- **Constants**: PascalCase or UPPER_CASE
-
-## Adding New Features
-
-### 1. Define Domain Entity (if needed)
-
-Add new entities to `internal/domain/entities.go`:
-
-```go
-type NewEntity struct {
-    ID   uuid.UUID `json:"id"`
-    Name string    `json:"name"`
-}
-```
-
-### 2. Define Ports
-
-Add interfaces to appropriate files in `internal/ports/`:
-
-```go
-type NewEntityRepository interface {
-    Create(ctx context.Context, entity *domain.NewEntity) error
-    GetByID(ctx context.Context, id uuid.UUID) (*domain.NewEntity, error)
-}
-```
-
-### 3. Implement Application Service
-
-Create service in `internal/application/`:
-
-```go
-type NewEntityService struct {
-    repo ports.NewEntityRepository
-}
-
-func (s *NewEntityService) CreateEntity(ctx context.Context, name string) (*domain.NewEntity, error) {
-    // Implementation
-}
-```
-
-### 4. Implement Adapters
-
-Add repository implementation to `internal/adapters/`:
-
-```go
-func (r *MemoryRepository) CreateNewEntity(ctx context.Context, entity *domain.NewEntity) error {
-    // Implementation
-}
-```
-
-Add HTTP handlers to `internal/adapters/http_handler.go`:
-
-```go
-func (h *HTTPHandler) CreateNewEntity(c *gin.Context) {
-    // Implementation
-}
-```
-
-### 5. Wire Dependencies
-
-Update `cmd/main.go` to wire new dependencies:
-
-```go
-newEntityService := application.NewNewEntityService(repo)
-handler := adapters.NewHTTPHandler(appointmentService, newEntityService)
-r.POST("/entities", handler.CreateNewEntity)
-```
-
-## Testing Guidelines
-
-### Unit Tests
-
-- Test each layer independently
-- Use interfaces for mocking dependencies
-- Focus on business logic testing
-- Aim for high test coverage
-
-**Example test structure:**
-```go
-func TestAppointmentService_BookAppointment(t *testing.T) {
-    // Arrange
-    mockRepo := &MockAppointmentRepository{}
-    service := NewAppointmentService(mockRepo, nil)
-    
-    // Act
-    result, err := service.BookAppointment(ctx, serviceID, clientID, startTime)
-    
-    // Assert
-    assert.NoError(t, err)
-    assert.NotNil(t, result)
-}
-```
-
-### Integration Tests
-
-- Test adapter implementations
-- Test HTTP endpoints
-- Use test databases or containers
-
-## Debugging
-
-### Logging
-
-Add structured logging:
-```go
-import "log"
-
-log.Printf("Booking appointment for client %s", clientID)
-```
-
-### Common Issues
-
-1. **Import cycles**: Keep dependencies flowing in one direction
-2. **Interface violations**: Ensure adapters implement all interface methods
-3. **UUID parsing**: Always validate UUID strings before parsing
-
-## Dependencies
-
-### Current Dependencies
-
-- `github.com/google/uuid` - UUID generation and parsing
-- `github.com/gin-gonic/gin` - HTTP web framework
-
-### Adding New Dependencies
-
-1. Add to go.mod:
-```bash
-go get github.com/new/dependency
-```
-
-2. Import in code:
-```go
-import "github.com/new/dependency"
-```
-
-3. Update documentation if it affects API or architecture
-
-## Performance Considerations
-
-- Use context for request cancellation
-- Implement proper error handling
-- Consider adding database indexes for queries
-- Monitor memory usage with in-memory storage
-- Add request timeouts for external calls
-
-## Security Best Practices
-
-- Validate all input data
-- Use HTTPS in production
-- Implement proper authentication
-- Sanitize error messages
-- Use secure headers
-- Implement rate limiting
-
-## Deployment
-
-### Building for Production
+### Database
 
 ```bash
-CGO_ENABLED=0 GOOS=linux go build -o youmeet cmd/main.go
+# SQLite (desenvolvimento)
+export DB_TYPE=sqlite
+export DB_PATH=youmeet.db
+
+# PostgreSQL (produção)
+export DB_TYPE=postgres
+export DATABASE_URL="postgres://user:pass@localhost/dbname?sslmode=disable"
 ```
 
-### Docker (Future)
+## Contribuindo
 
-Create Dockerfile for containerization:
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o youmeet cmd/main.go
+1. **Fork** o repositório
+2. **Crie** uma branch para sua feature (`git checkout -b feature/nova-feature`)
+3. **Commit** suas mudanças (`git commit -am 'Add nova feature'`)
+4. **Push** para a branch (`git push origin feature/nova-feature`)
+5. **Abra** um Pull Request
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/youmeet .
-CMD ["./youmeet"]
+### Padrões de Commit
+
 ```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make changes following coding standards
-4. Add tests for new functionality
-5. Update documentation
-6. Submit a pull request
-
-## Troubleshooting
-
-### Common Build Issues
-
-- **Module not found**: Run `go mod download`
-- **Import cycle**: Check package dependencies
-- **Missing dependencies**: Run `go mod tidy`
-
-### Runtime Issues
-
-- **Port already in use**: Change port in main.go or kill existing process
-- **Invalid UUID**: Ensure proper UUID format in requests
-- **Memory leaks**: Monitor goroutines and memory usage
+feat: adiciona nova funcionalidade
+fix: corrige bug
+docs: atualiza documentação
+style: mudanças de formatação
+refactor: refatoração de código
+test: adiciona ou modifica testes
+chore: mudanças de build ou ferramentas
+```

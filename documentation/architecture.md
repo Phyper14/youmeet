@@ -1,149 +1,143 @@
-# Architecture Guide
+# Arquitetura - YouMeet
 
-## Overview
+## Visão Geral
 
-YouMeet follows the **Hexagonal Architecture** (also known as Ports and Adapters pattern) to achieve separation of concerns, testability, and maintainability.
+O YouMeet segue os princípios da **Arquitetura Hexagonal** (Ports and Adapters), garantindo separação clara de responsabilidades e alta testabilidade.
 
-## Architecture Layers
-
-### Domain Layer (`internal/domain/`)
-
-The core business logic and entities. This layer is independent of external concerns.
-
-**Components:**
-- `entities.go` - Domain entities (User, Service, Appointment)
-
-**Responsibilities:**
-- Define business entities and their properties
-- Contain business rules and invariants
-- Independent of external frameworks and databases
-
-### Ports Layer (`internal/ports/`)
-
-Defines interfaces that the application uses to interact with external systems.
-
-**Components:**
-- `services.go` - Application service interfaces
-- `repositories.go` - Repository interfaces for data persistence
-
-**Responsibilities:**
-- Define contracts for external dependencies
-- Provide abstraction for application services
-- Enable dependency inversion
-
-### Application Layer (`internal/application/`)
-
-Contains application-specific business logic and orchestrates domain entities.
-
-**Components:**
-- `appointment_service.go` - Appointment business logic implementation
-
-**Responsibilities:**
-- Implement application use cases
-- Orchestrate domain entities
-- Depend on ports, not concrete implementations
-
-### Adapters Layer (`internal/adapters/`)
-
-Implements the ports interfaces and handles external concerns.
-
-**Components:**
-- `http_handler.go` - HTTP REST API adapter
-- `memory_repository.go` - In-memory data storage adapter
-
-**Responsibilities:**
-- Implement port interfaces
-- Handle external system integration
-- Convert between external formats and domain models
-
-### Infrastructure Layer (`cmd/`)
-
-Application entry point and dependency injection.
-
-**Components:**
-- `main.go` - Application bootstrap and dependency wiring
-
-**Responsibilities:**
-- Initialize and wire dependencies
-- Start the application
-- Configure external systems
-
-## Dependency Flow
+## Estrutura do Projeto
 
 ```
-┌─────────────────┐    ┌─────────────────┐
-│   HTTP Client   │───▶│  HTTP Handler   │
-└─────────────────┘    └─────────────────┘
-                                │
-                                ▼
-┌─────────────────┐    ┌─────────────────┐
-│   Repository    │◀───│ Application     │
-│   (Memory)      │    │ Service         │
-└─────────────────┘    └─────────────────┘
-                                │
-                                ▼
-                       ┌─────────────────┐
-                       │   Domain        │
-                       │   Entities      │
-                       └─────────────────┘
+youmeet/
+├── cmd/api/                       # Ponto de entrada da aplicação
+│   └── main.go
+├── internal/
+│   ├── core/                      # Núcleo da aplicação (hexagonal)
+│   │   ├── domain/               # Entidades e regras de negócio
+│   │   │   ├── appointment/      # Domínio de Agendamento
+│   │   │   ├── auth/            # Domínio de Autenticação
+│   │   │   ├── service/         # Domínio de Serviço
+│   │   │   └── user/            # Domínio de Usuário
+│   │   └── services/            # Lógica de negócio (casos de uso)
+│   │       ├── auth_service.go
+│   │       └── booking_service.go
+│   ├── adapters/                # Adaptadores externos
+│   │   ├── handlers/            # Adaptadores de entrada (HTTP)
+│   │   │   ├── auth_handler/
+│   │   │   └── appointment_handler/
+│   │   └── repositories/        # Adaptadores de saída (dados)
+│   │       ├── db_interface.go  # Interface DBClient
+│   │       ├── user_repository.go
+│   │       ├── appointment_repository.go
+│   │       └── service_repository.go
+│   └── infra/                   # Implementações de infraestrutura
+│       └── database/
+│           ├── factory.go       # Factory para escolha do banco
+│           ├── postgres_client.go
+│           └── sqlite_client.go
+└── documentation/               # Documentação do projeto
 ```
 
-## Key Principles
+## Princípios da Arquitetura Hexagonal
 
-### Dependency Inversion
+### 1. **Core (Núcleo)**
+- **Domain**: Entidades puras sem dependências externas
+- **Services**: Lógica de negócio e casos de uso
+- **Não conhece** detalhes de infraestrutura (banco, web, etc.)
 
-- High-level modules don't depend on low-level modules
-- Both depend on abstractions (interfaces)
-- Application layer depends on ports, not concrete adapters
+### 2. **Adapters (Adaptadores)**
+- **Handlers**: Adaptadores de entrada (HTTP → Core)
+- **Repositories**: Adaptadores de saída (Core → Database)
+- **Interfaces**: Contratos definidos pelos adaptadores
 
-### Separation of Concerns
+### 3. **Infrastructure (Infraestrutura)**
+- **Database Clients**: Implementações concretas dos bancos
+- **Factory**: Escolha da implementação baseada em configuração
 
-- **Domain**: Business logic and entities
-- **Application**: Use cases and workflows  
-- **Adapters**: External system integration
-- **Infrastructure**: Configuration and bootstrapping
-
-### Testability
-
-- Each layer can be tested in isolation
-- Dependencies can be easily mocked through interfaces
-- Business logic is independent of external systems
-
-## Package Structure
+## Fluxo de Dependências
 
 ```
-internal/
-├── domain/           # Business entities and rules
-│   └── entities.go
-├── ports/            # Interface definitions
-│   ├── services.go   # Application service interfaces
-│   └── repositories.go # Repository interfaces
-├── application/      # Use case implementations
-│   └── appointment_service.go
-└── adapters/         # External system adapters
-    ├── http_handler.go    # HTTP REST API
-    └── memory_repository.go # In-memory storage
+Infrastructure → Adapters → Core
 ```
 
-## Benefits
+- **Core** não depende de nada
+- **Adapters** dependem do Core (interfaces)
+- **Infrastructure** depende dos Adapters (implementa interfaces)
 
-1. **Maintainability**: Clear separation makes code easier to understand and modify
-2. **Testability**: Each component can be tested independently
-3. **Flexibility**: Easy to swap implementations (e.g., database, web framework)
-4. **Independence**: Business logic is isolated from external concerns
-5. **Scalability**: Architecture supports growth and complexity
+## Inversão de Dependências
 
-## Design Patterns Used
+### Interface DBClient
+```go
+// Definida em: internal/adapters/repositories/db_interface.go
+type DBClient interface {
+    Create(value interface{}) error
+    First(dest interface{}, conds ...interface{}) error
+    Find(dest interface{}, conds ...interface{}) error
+    Where(query interface{}, args ...interface{}) DBClient
+    Delete(value interface{}, conds ...interface{}) error
+    AutoMigrate(dst ...interface{}) error
+}
+```
 
-- **Ports and Adapters**: Main architectural pattern
-- **Dependency Injection**: Used in main.go for wiring components
-- **Repository Pattern**: For data access abstraction
-- **Service Layer**: For application logic organization
+### Implementações
+- **PostgresClient**: Implementa DBClient usando GORM + PostgreSQL
+- **SQLiteClient**: Implementa DBClient usando GORM + SQLite
 
-## Future Considerations
+## Benefícios da Arquitetura
 
-- Add database adapter (PostgreSQL, MySQL)
-- Implement authentication and authorization
-- Add caching layer
-- Implement event-driven architecture
-- Add API versioning support
+### 1. **Testabilidade**
+- Core isolado e facilmente testável
+- Mocks simples das interfaces
+- Testes unitários independentes de infraestrutura
+
+### 2. **Flexibilidade**
+- Troca de banco de dados sem alterar lógica de negócio
+- Múltiplos adaptadores de entrada (HTTP, CLI, gRPC)
+- Fácil adição de novos recursos
+
+### 3. **Manutenibilidade**
+- Separação clara de responsabilidades
+- Baixo acoplamento entre camadas
+- Código limpo e organizad
+
+### 4. **Escalabilidade**
+- Arquitetura preparada para crescimento
+- Fácil adição de novos domínios
+- Suporte a múltiplas implementações
+
+## Padrões Utilizados
+
+### 1. **Repository Pattern**
+- Abstração da camada de dados
+- Interface definida pelos casos de uso
+- Implementações específicas por tecnologia
+
+### 2. **Factory Pattern**
+- Criação de objetos baseada em configuração
+- Escolha de implementação em tempo de execução
+- Facilita testes e configurações diferentes
+
+### 3. **Dependency Injection**
+- Injeção de dependências via construtores
+- Inversão de controle
+- Facilita testes e mocks
+
+## Configuração de Ambiente
+
+### PostgreSQL (Produção)
+```bash
+export DB_TYPE=postgres
+export DATABASE_URL="host=localhost user=youmeet password=youmeet dbname=youmeet port=5432 sslmode=disable"
+```
+
+### SQLite (Desenvolvimento/Testes)
+```bash
+export DB_TYPE=sqlite
+export DB_PATH=youmeet.db
+```
+
+## Migração de Dados
+
+O sistema utiliza **Auto-Migration** do GORM:
+- Tabelas criadas automaticamente a partir das entidades
+- Relacionamentos definidos via tags GORM
+- Suporte a múltiplos bancos de dados

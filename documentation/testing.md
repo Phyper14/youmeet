@@ -1,492 +1,197 @@
-# Testing Guide
+# Testes - YouMeet
 
-## Overview
+## Visão Geral
 
-This guide covers testing strategies, implementation patterns, and best practices for the YouMeet application.
+O YouMeet utiliza uma estratégia de testes em múltiplas camadas, aproveitando a arquitetura hexagonal para facilitar a criação de testes isolados e confiáveis.
 
-## Testing Strategy
+## Estrutura de Testes
 
-### Testing Pyramid
+```
+youmeet/
+├── internal/
+│   ├── core/
+│   │   ├── domain/
+│   │   │   └── *_test.go          # Testes de entidades
+│   │   └── services/
+│   │       └── *_service_test.go  # Testes de lógica de negócio
+│   ├── adapters/
+│   │   ├── handlers/
+│   │   │   └── *_handler_test.go  # Testes de handlers HTTP
+│   │   └── repositories/
+│   │       └── *_repository_test.go # Testes de repositórios
+│   └── infra/
+│       └── database/
+│           └── *_client_test.go   # Testes de clientes de banco
+├── tests/
+│   ├── integration/               # Testes de integração
+│   ├── e2e/                      # Testes end-to-end
+│   └── mocks/                    # Mocks e stubs
+└── testdata/                     # Dados de teste
+```
 
-1. **Unit Tests** (70%) - Test individual components in isolation
-2. **Integration Tests** (20%) - Test component interactions
-3. **End-to-End Tests** (10%) - Test complete user workflows
+## Tipos de Testes
 
-### Test Categories
+### 1. Testes Unitários
 
-- **Domain Tests** - Business logic validation
-- **Application Tests** - Use case testing with mocked dependencies
-- **Adapter Tests** - External system integration testing
-- **API Tests** - HTTP endpoint testing
-
-## Unit Testing
-
-### Domain Layer Testing
-
-**Test file: `internal/domain/entities_test.go`**
+#### Testando Entidades (Domain)
 ```go
-package domain
+// internal/core/domain/user/user_test.go
+package user_test
 
 import (
     "testing"
-    "time"
+    "youmeet/internal/core/domain/user"
     "github.com/google/uuid"
-    "github.com/stretchr/testify/assert"
 )
 
-func TestAppointment_Creation(t *testing.T) {
-    // Arrange
-    id := uuid.New()
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    startTime := time.Now()
-
-    // Act
-    appointment := &Appointment{
-        ID:        id,
-        ServiceID: serviceID,
-        ClientID:  clientID,
-        StartTime: startTime,
-        Status:    "scheduled",
-    }
-
-    // Assert
-    assert.Equal(t, id, appointment.ID)
-    assert.Equal(t, serviceID, appointment.ServiceID)
-    assert.Equal(t, clientID, appointment.ClientID)
-    assert.Equal(t, startTime, appointment.StartTime)
-    assert.Equal(t, "scheduled", appointment.Status)
-}
-
-func TestService_Validation(t *testing.T) {
+func TestUser_IsValid(t *testing.T) {
     tests := []struct {
-        name     string
-        service  Service
-        expected bool
+        name    string
+        user    user.User
+        wantErr bool
     }{
         {
-            name: "valid service",
-            service: Service{
-                ID:       uuid.New(),
-                Name:     "Consultation",
-                Duration: 30 * time.Minute,
-                Price:    100.0,
+            name: "valid user",
+            user: user.User{
+                ID:    uuid.New(),
+                Name:  "João Silva",
+                Email: "joao@email.com",
+                Role:  "client",
             },
-            expected: true,
+            wantErr: false,
         },
         {
-            name: "invalid price",
-            service: Service{
-                ID:       uuid.New(),
-                Name:     "Consultation",
-                Duration: 30 * time.Minute,
-                Price:    -10.0,
+            name: "invalid email",
+            user: user.User{
+                ID:    uuid.New(),
+                Name:  "João Silva",
+                Email: "invalid-email",
+                Role:  "client",
             },
-            expected: false,
+            wantErr: true,
         },
     }
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            valid := tt.service.Price > 0 && tt.service.Name != ""
-            assert.Equal(t, tt.expected, valid)
+            err := tt.user.Validate()
+            if (err != nil) != tt.wantErr {
+                t.Errorf("User.Validate() error = %v, wantErr %v", err, tt.wantErr)
+            }
         })
     }
 }
 ```
 
-### Application Layer Testing
-
-**Test file: `internal/application/appointment_service_test.go`**
+#### Testando Services (Lógica de Negócio)
 ```go
-package application
+// internal/core/services/auth_service_test.go
+package services_test
 
 import (
     "context"
     "testing"
-    "time"
-    "github.com/google/uuid"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/mock"
-    "youmeet/internal/domain"
+    "youmeet/internal/core/domain/auth"
+    "youmeet/internal/core/services"
+    "youmeet/tests/mocks"
 )
 
-// Mock repository
-type MockAppointmentRepository struct {
-    mock.Mock
-}
-
-func (m *MockAppointmentRepository) Create(ctx context.Context, appointment *domain.Appointment) error {
-    args := m.Called(ctx, appointment)
-    return args.Error(0)
-}
-
-func (m *MockAppointmentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Appointment, error) {
-    args := m.Called(ctx, id)
-    return args.Get(0).(*domain.Appointment), args.Error(1)
-}
-
-func (m *MockAppointmentRepository) List(ctx context.Context, clientID uuid.UUID) ([]*domain.Appointment, error) {
-    args := m.Called(ctx, clientID)
-    return args.Get(0).([]*domain.Appointment), args.Error(1)
-}
-
-type MockServiceRepository struct {
-    mock.Mock
-}
-
-func (m *MockServiceRepository) Create(ctx context.Context, service *domain.Service) error {
-    args := m.Called(ctx, service)
-    return args.Error(0)
-}
-
-func (m *MockServiceRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Service, error) {
-    args := m.Called(ctx, id)
-    return args.Get(0).(*domain.Service), args.Error(1)
-}
-
-func (m *MockServiceRepository) List(ctx context.Context) ([]*domain.Service, error) {
-    args := m.Called(ctx)
-    return args.Get(0).([]*domain.Service), args.Error(1)
-}
-
-func TestAppointmentService_BookAppointment(t *testing.T) {
+func TestAuthService_Register(t *testing.T) {
     // Arrange
-    mockAppointmentRepo := new(MockAppointmentRepository)
-    mockServiceRepo := new(MockServiceRepository)
-    service := NewAppointmentService(mockAppointmentRepo, mockServiceRepo)
+    mockUserRepo := &mocks.UserRepository{}
+    mockCompanyRepo := &mocks.CompanyRepository{}
+    mockProfRepo := &mocks.ProfessionalRepository{}
     
-    ctx := context.Background()
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    startTimeStr := "2024-01-15T10:00:00Z"
+    service := services.NewAuthService(mockUserRepo, mockCompanyRepo, mockProfRepo)
     
-    mockAppointmentRepo.On("Create", ctx, mock.AnythingOfType("*domain.Appointment")).Return(nil)
-
-    // Act
-    appointment, err := service.BookAppointment(ctx, serviceID, clientID, startTimeStr)
-
-    // Assert
-    assert.NoError(t, err)
-    assert.NotNil(t, appointment)
-    assert.Equal(t, serviceID, appointment.ServiceID)
-    assert.Equal(t, clientID, appointment.ClientID)
-    assert.Equal(t, "scheduled", appointment.Status)
-    mockAppointmentRepo.AssertExpectations(t)
-}
-
-func TestAppointmentService_BookAppointment_InvalidTime(t *testing.T) {
-    // Arrange
-    mockAppointmentRepo := new(MockAppointmentRepository)
-    mockServiceRepo := new(MockServiceRepository)
-    service := NewAppointmentService(mockAppointmentRepo, mockServiceRepo)
-    
-    ctx := context.Background()
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    invalidTimeStr := "invalid-time-format"
-
-    // Act
-    appointment, err := service.BookAppointment(ctx, serviceID, clientID, invalidTimeStr)
-
-    // Assert
-    assert.Error(t, err)
-    assert.Nil(t, appointment)
-}
-
-func TestAppointmentService_GetAppointments(t *testing.T) {
-    // Arrange
-    mockAppointmentRepo := new(MockAppointmentRepository)
-    mockServiceRepo := new(MockServiceRepository)
-    service := NewAppointmentService(mockAppointmentRepo, mockServiceRepo)
-    
-    ctx := context.Background()
-    clientID := uuid.New()
-    
-    expectedAppointments := []*domain.Appointment{
-        {
-            ID:        uuid.New(),
-            ServiceID: uuid.New(),
-            ClientID:  clientID,
-            StartTime: time.Now(),
-            Status:    "scheduled",
-        },
+    req := &auth.RegisterRequest{
+        Name:     "João Silva",
+        Email:    "joao@email.com",
+        Password: "senha123",
+        Role:     "client",
     }
-    
-    mockAppointmentRepo.On("List", ctx, clientID).Return(expectedAppointments, nil)
 
     // Act
-    appointments, err := service.GetAppointments(ctx, clientID)
+    user, err := service.Register(context.Background(), req)
 
     // Assert
-    assert.NoError(t, err)
-    assert.Equal(t, expectedAppointments, appointments)
-    mockAppointmentRepo.AssertExpectations(t)
+    if err != nil {
+        t.Errorf("AuthService.Register() error = %v", err)
+    }
+    if user == nil {
+        t.Error("AuthService.Register() returned nil user")
+    }
+    if user.Email != req.Email {
+        t.Errorf("Expected email %s, got %s", req.Email, user.Email)
+    }
 }
 ```
 
-### Adapter Layer Testing
+### 2. Testes de Integração
 
-**Test file: `internal/adapters/memory_repository_test.go`**
+#### Testando Repositórios com Banco Real
 ```go
-package adapters
+// internal/adapters/repositories/user_repository_integration_test.go
+package repositories_test
 
 import (
     "context"
     "testing"
-    "time"
+    "youmeet/internal/adapters/repositories"
+    "youmeet/internal/core/domain/user"
+    "youmeet/internal/infra/database"
     "github.com/google/uuid"
-    "github.com/stretchr/testify/assert"
-    "youmeet/internal/domain"
 )
 
-func TestMemoryRepository_CreateAndGetAppointment(t *testing.T) {
-    // Arrange
-    repo := NewMemoryRepository()
-    ctx := context.Background()
-    
-    appointment := &domain.Appointment{
-        ID:        uuid.New(),
-        ServiceID: uuid.New(),
-        ClientID:  uuid.New(),
-        StartTime: time.Now(),
-        Status:    "scheduled",
+func TestUserRepository_Integration(t *testing.T) {
+    // Setup banco de teste
+    db, err := database.NewSQLiteClient(":memory:")
+    if err != nil {
+        t.Fatalf("Failed to create test database: %v", err)
     }
 
-    // Act - Create
-    err := repo.Create(ctx, appointment)
-    assert.NoError(t, err)
-
-    // Act - Get
-    retrieved, err := repo.GetByID(ctx, appointment.ID)
-
-    // Assert
-    assert.NoError(t, err)
-    assert.Equal(t, appointment, retrieved)
-}
-
-func TestMemoryRepository_ListAppointmentsByClient(t *testing.T) {
-    // Arrange
-    repo := NewMemoryRepository()
-    ctx := context.Background()
-    clientID := uuid.New()
-    
-    appointment1 := &domain.Appointment{
-        ID:        uuid.New(),
-        ServiceID: uuid.New(),
-        ClientID:  clientID,
-        StartTime: time.Now(),
-        Status:    "scheduled",
-    }
-    
-    appointment2 := &domain.Appointment{
-        ID:        uuid.New(),
-        ServiceID: uuid.New(),
-        ClientID:  clientID,
-        StartTime: time.Now().Add(time.Hour),
-        Status:    "scheduled",
-    }
-    
-    // Different client
-    appointment3 := &domain.Appointment{
-        ID:        uuid.New(),
-        ServiceID: uuid.New(),
-        ClientID:  uuid.New(),
-        StartTime: time.Now().Add(2 * time.Hour),
-        Status:    "scheduled",
+    // Auto-migrate
+    err = db.AutoMigrate(&user.User{})
+    if err != nil {
+        t.Fatalf("Failed to migrate: %v", err)
     }
 
-    // Act
-    repo.Create(ctx, appointment1)
-    repo.Create(ctx, appointment2)
-    repo.Create(ctx, appointment3)
-    
-    appointments, err := repo.List(ctx, clientID)
+    repo := repositories.NewUserRepository(db)
 
-    // Assert
-    assert.NoError(t, err)
-    assert.Len(t, appointments, 2)
-    assert.Contains(t, appointments, appointment1)
-    assert.Contains(t, appointments, appointment2)
-}
+    t.Run("Create and Get User", func(t *testing.T) {
+        // Arrange
+        testUser := &user.User{
+            ID:    uuid.New(),
+            Name:  "Test User",
+            Email: "test@email.com",
+            Role:  "client",
+        }
 
-func TestMemoryRepository_GetNonExistentAppointment(t *testing.T) {
-    // Arrange
-    repo := NewMemoryRepository()
-    ctx := context.Background()
-    nonExistentID := uuid.New()
+        // Act - Create
+        err := repo.Create(context.Background(), testUser)
+        if err != nil {
+            t.Fatalf("Failed to create user: %v", err)
+        }
 
-    // Act
-    appointment, err := repo.GetByID(ctx, nonExistentID)
+        // Act - Get
+        retrievedUser, err := repo.GetByID(context.Background(), testUser.ID)
+        if err != nil {
+            t.Fatalf("Failed to get user: %v", err)
+        }
 
-    // Assert
-    assert.Error(t, err)
-    assert.Nil(t, appointment)
-    assert.Contains(t, err.Error(), "not found")
+        // Assert
+        if retrievedUser.Email != testUser.Email {
+            t.Errorf("Expected email %s, got %s", testUser.Email, retrievedUser.Email)
+        }
+    })
 }
 ```
 
-## Integration Testing
+### 3. Testes de Handlers (HTTP)
 
-### HTTP Handler Testing
-
-**Test file: `internal/adapters/http_handler_test.go`**
 ```go
-package adapters
-
-import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "net/http"
-    "net/http/httptest"
-    "testing"
-    "github.com/gorilla/mux"
-    "github.com/google/uuid"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/mock"
-    "youmeet/internal/domain"
-)
-
-type MockAppointmentService struct {
-    mock.Mock
-}
-
-func (m *MockAppointmentService) BookAppointment(ctx context.Context, serviceID, clientID uuid.UUID, startTime string) (*domain.Appointment, error) {
-    args := m.Called(ctx, serviceID, clientID, startTime)
-    return args.Get(0).(*domain.Appointment), args.Error(1)
-}
-
-func (m *MockAppointmentService) GetAppointments(ctx context.Context, clientID uuid.UUID) ([]*domain.Appointment, error) {
-    args := m.Called(ctx, clientID)
-    return args.Get(0).([]*domain.Appointment), args.Error(1)
-}
-
-func TestHTTPHandler_BookAppointment(t *testing.T) {
-    // Arrange
-    mockService := new(MockAppointmentService)
-    handler := NewHTTPHandler(mockService)
-    
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    startTime := "2024-01-15T10:00:00Z"
-    
-    expectedAppointment := &domain.Appointment{
-        ID:        uuid.New(),
-        ServiceID: serviceID,
-        ClientID:  clientID,
-        Status:    "scheduled",
-    }
-    
-    mockService.On("BookAppointment", mock.Anything, serviceID, clientID, startTime).Return(expectedAppointment, nil)
-    
-    requestBody := BookAppointmentRequest{
-        ServiceID: serviceID,
-        ClientID:  clientID,
-        StartTime: startTime,
-    }
-    
-    jsonBody, _ := json.Marshal(requestBody)
-    req := httptest.NewRequest("POST", "/appointments", bytes.NewBuffer(jsonBody))
-    req.Header.Set("Content-Type", "application/json")
-    
-    rr := httptest.NewRecorder()
-
-    // Act
-    handler.BookAppointment(rr, req)
-
-    // Assert
-    assert.Equal(t, http.StatusOK, rr.Code)
-    assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
-    
-    var response domain.Appointment
-    err := json.Unmarshal(rr.Body.Bytes(), &response)
-    assert.NoError(t, err)
-    assert.Equal(t, expectedAppointment.ID, response.ID)
-    
-    mockService.AssertExpectations(t)
-}
-
-func TestHTTPHandler_BookAppointment_InvalidJSON(t *testing.T) {
-    // Arrange
-    mockService := new(MockAppointmentService)
-    handler := NewHTTPHandler(mockService)
-    
-    req := httptest.NewRequest("POST", "/appointments", bytes.NewBufferString("invalid json"))
-    req.Header.Set("Content-Type", "application/json")
-    
-    rr := httptest.NewRecorder()
-
-    // Act
-    handler.BookAppointment(rr, req)
-
-    // Assert
-    assert.Equal(t, http.StatusBadRequest, rr.Code)
-}
-
-func TestHTTPHandler_GetAppointments(t *testing.T) {
-    // Arrange
-    mockService := new(MockAppointmentService)
-    handler := NewHTTPHandler(mockService)
-    
-    clientID := uuid.New()
-    expectedAppointments := []*domain.Appointment{
-        {
-            ID:        uuid.New(),
-            ServiceID: uuid.New(),
-            ClientID:  clientID,
-            Status:    "scheduled",
-        },
-    }
-    
-    mockService.On("GetAppointments", mock.Anything, clientID).Return(expectedAppointments, nil)
-    
-    req := httptest.NewRequest("GET", "/appointments/"+clientID.String(), nil)
-    req = mux.SetURLVars(req, map[string]string{"clientId": clientID.String()})
-    
-    rr := httptest.NewRecorder()
-
-    // Act
-    handler.GetAppointments(rr, req)
-
-    // Assert
-    assert.Equal(t, http.StatusOK, rr.Code)
-    assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
-    
-    var response []*domain.Appointment
-    err := json.Unmarshal(rr.Body.Bytes(), &response)
-    assert.NoError(t, err)
-    assert.Len(t, response, 1)
-    assert.Equal(t, expectedAppointments[0].ID, response[0].ID)
-    
-    mockService.AssertExpectations(t)
-}
-
-func TestHTTPHandler_GetAppointments_InvalidClientID(t *testing.T) {
-    // Arrange
-    mockService := new(MockAppointmentService)
-    handler := NewHTTPHandler(mockService)
-    
-    req := httptest.NewRequest("GET", "/appointments/invalid-uuid", nil)
-    req = mux.SetURLVars(req, map[string]string{"clientId": "invalid-uuid"})
-    
-    rr := httptest.NewRecorder()
-
-    // Act
-    handler.GetAppointments(rr, req)
-
-    // Assert
-    assert.Equal(t, http.StatusBadRequest, rr.Code)
-}
-```
-
-## End-to-End Testing
-
-### API Integration Tests
-
-**Test file: `test/integration/api_test.go`**
-```go
-package integration
+// internal/adapters/handlers/auth_handler/auth_handler_test.go
+package auth_handler_test
 
 import (
     "bytes"
@@ -494,240 +199,222 @@ import (
     "net/http"
     "net/http/httptest"
     "testing"
-    "github.com/gorilla/mux"
-    "github.com/google/uuid"
-    "github.com/stretchr/testify/assert"
-    "youmeet/internal/adapters"
-    "youmeet/internal/application"
+    "youmeet/internal/adapters/handlers/auth_handler"
+    "youmeet/internal/core/services"
+    "youmeet/tests/mocks"
+    "github.com/gin-gonic/gin"
 )
 
-func setupTestServer() *httptest.Server {
-    repo := adapters.NewMemoryRepository()
-    appointmentService := application.NewAppointmentService(repo, repo)
-    handler := adapters.NewHTTPHandler(appointmentService)
-
-    r := mux.NewRouter()
-    r.HandleFunc("/appointments", handler.BookAppointment).Methods("POST")
-    r.HandleFunc("/appointments/{clientId}", handler.GetAppointments).Methods("GET")
-
-    return httptest.NewServer(r)
-}
-
-func TestAPI_BookAndRetrieveAppointment(t *testing.T) {
-    // Arrange
-    server := setupTestServer()
-    defer server.Close()
-
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    startTime := "2024-01-15T10:00:00Z"
-
-    bookingRequest := map[string]interface{}{
-        "service_id": serviceID,
-        "client_id":  clientID,
-        "start_time": startTime,
-    }
-
-    jsonBody, _ := json.Marshal(bookingRequest)
-
-    // Act 1: Book appointment
-    resp, err := http.Post(server.URL+"/appointments", "application/json", bytes.NewBuffer(jsonBody))
-    assert.NoError(t, err)
-    defer resp.Body.Close()
-
-    // Assert 1: Booking successful
-    assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-    var bookedAppointment map[string]interface{}
-    err = json.NewDecoder(resp.Body).Decode(&bookedAppointment)
-    assert.NoError(t, err)
-    assert.Equal(t, serviceID.String(), bookedAppointment["service_id"])
-    assert.Equal(t, clientID.String(), bookedAppointment["client_id"])
-
-    // Act 2: Retrieve appointments
-    resp2, err := http.Get(server.URL + "/appointments/" + clientID.String())
-    assert.NoError(t, err)
-    defer resp2.Body.Close()
-
-    // Assert 2: Retrieval successful
-    assert.Equal(t, http.StatusOK, resp2.StatusCode)
-
-    var appointments []map[string]interface{}
-    err = json.NewDecoder(resp2.Body).Decode(&appointments)
-    assert.NoError(t, err)
-    assert.Len(t, appointments, 1)
-    assert.Equal(t, serviceID.String(), appointments[0]["service_id"])
-}
-
-func TestAPI_MultipleAppointmentsForClient(t *testing.T) {
-    // Arrange
-    server := setupTestServer()
-    defer server.Close()
-
-    clientID := uuid.New()
+func TestAuthHandler_Register(t *testing.T) {
+    // Setup
+    gin.SetMode(gin.TestMode)
     
-    appointments := []map[string]interface{}{
-        {
-            "service_id": uuid.New(),
-            "client_id":  clientID,
-            "start_time": "2024-01-15T10:00:00Z",
-        },
-        {
-            "service_id": uuid.New(),
-            "client_id":  clientID,
-            "start_time": "2024-01-15T11:00:00Z",
-        },
-    }
+    mockUserRepo := &mocks.UserRepository{}
+    mockCompanyRepo := &mocks.CompanyRepository{}
+    mockProfRepo := &mocks.ProfessionalRepository{}
+    
+    authService := services.NewAuthService(mockUserRepo, mockCompanyRepo, mockProfRepo)
+    handler := auth_handler.NewHandler(authService)
 
-    // Act: Book multiple appointments
-    for _, appointment := range appointments {
-        jsonBody, _ := json.Marshal(appointment)
-        resp, err := http.Post(server.URL+"/appointments", "application/json", bytes.NewBuffer(jsonBody))
-        assert.NoError(t, err)
-        assert.Equal(t, http.StatusOK, resp.StatusCode)
-        resp.Body.Close()
-    }
+    router := gin.New()
+    router.POST("/auth/register", handler.Register)
 
-    // Act: Retrieve all appointments
-    resp, err := http.Get(server.URL + "/appointments/" + clientID.String())
-    assert.NoError(t, err)
-    defer resp.Body.Close()
+    t.Run("successful registration", func(t *testing.T) {
+        // Arrange
+        reqBody := auth_handler.RegisterRequest{
+            Name:     "João Silva",
+            Email:    "joao@email.com",
+            Password: "senha123",
+            Role:     "client",
+        }
+        
+        jsonBody, _ := json.Marshal(reqBody)
+        req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(jsonBody))
+        req.Header.Set("Content-Type", "application/json")
+        
+        w := httptest.NewRecorder()
 
-    // Assert
-    assert.Equal(t, http.StatusOK, resp.StatusCode)
+        // Act
+        router.ServeHTTP(w, req)
 
-    var retrievedAppointments []map[string]interface{}
-    err = json.NewDecoder(resp.Body).Decode(&retrievedAppointments)
-    assert.NoError(t, err)
-    assert.Len(t, retrievedAppointments, 2)
+        // Assert
+        if w.Code != http.StatusCreated {
+            t.Errorf("Expected status %d, got %d", http.StatusCreated, w.Code)
+        }
+
+        var response map[string]interface{}
+        err := json.Unmarshal(w.Body.Bytes(), &response)
+        if err != nil {
+            t.Fatalf("Failed to unmarshal response: %v", err)
+        }
+
+        if response["message"] != "Usuário criado com sucesso" {
+            t.Errorf("Unexpected response message: %v", response["message"])
+        }
+    })
 }
 ```
 
-## Test Configuration
+### 4. Testes End-to-End
 
-### Test Dependencies
-
-Add to `go.mod`:
 ```go
-require (
-    github.com/stretchr/testify v1.8.4
+// tests/e2e/auth_flow_test.go
+package e2e_test
+
+import (
+    "bytes"
+    "encoding/json"
+    "net/http"
+    "testing"
+    "youmeet/cmd/api"
 )
+
+func TestAuthFlow_E2E(t *testing.T) {
+    // Setup servidor de teste
+    server := api.SetupTestServer()
+    defer server.Close()
+
+    t.Run("complete auth flow", func(t *testing.T) {
+        // 1. Register
+        registerReq := map[string]string{
+            "name":     "Test User",
+            "email":    "test@email.com",
+            "password": "senha123",
+            "role":     "client",
+        }
+        
+        registerBody, _ := json.Marshal(registerReq)
+        resp, err := http.Post(server.URL+"/auth/register", "application/json", bytes.NewBuffer(registerBody))
+        if err != nil {
+            t.Fatalf("Register request failed: %v", err)
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusCreated {
+            t.Errorf("Expected status 201, got %d", resp.StatusCode)
+        }
+
+        // 2. Login
+        loginReq := map[string]string{
+            "email":    "test@email.com",
+            "password": "senha123",
+        }
+        
+        loginBody, _ := json.Marshal(loginReq)
+        resp, err = http.Post(server.URL+"/auth/login", "application/json", bytes.NewBuffer(loginBody))
+        if err != nil {
+            t.Fatalf("Login request failed: %v", err)
+        }
+        defer resp.Body.Close()
+
+        if resp.StatusCode != http.StatusOK {
+            t.Errorf("Expected status 200, got %d", resp.StatusCode)
+        }
+
+        var loginResponse map[string]interface{}
+        json.NewDecoder(resp.Body).Decode(&loginResponse)
+        
+        if loginResponse["token"] == nil {
+            t.Error("Expected token in login response")
+        }
+    })
+}
 ```
 
-Install test dependencies:
-```bash
-go get github.com/stretchr/testify/assert
-go get github.com/stretchr/testify/mock
-go get github.com/stretchr/testify/suite
+## Mocks e Stubs
+
+### Criando Mocks
+```go
+// tests/mocks/user_repository.go
+package mocks
+
+import (
+    "context"
+    "youmeet/internal/core/domain/user"
+    "github.com/google/uuid"
+)
+
+type UserRepository struct {
+    users map[uuid.UUID]*user.User
+}
+
+func NewUserRepository() *UserRepository {
+    return &UserRepository{
+        users: make(map[uuid.UUID]*user.User),
+    }
+}
+
+func (m *UserRepository) Create(ctx context.Context, u *user.User) error {
+    m.users[u.ID] = u
+    return nil
+}
+
+func (m *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*user.User, error) {
+    if user, exists := m.users[id]; exists {
+        return user, nil
+    }
+    return nil, errors.New("user not found")
+}
+
+func (m *UserRepository) GetByEmail(ctx context.Context, email string) (*user.User, error) {
+    for _, user := range m.users {
+        if user.Email == email {
+            return user, nil
+        }
+    }
+    return nil, errors.New("user not found")
+}
 ```
 
-### Test Makefile
+## Configuração de Testes
 
-Create `Makefile`:
+### Makefile
 ```makefile
-.PHONY: test test-unit test-integration test-coverage test-race
+# Makefile
+.PHONY: test test-unit test-integration test-e2e test-coverage
 
-# Run all tests
-test:
-	go test ./...
+test: test-unit test-integration
 
-# Run unit tests only
 test-unit:
-	go test -short ./...
+	go test -short ./internal/core/...
 
-# Run integration tests only
 test-integration:
-	go test -run Integration ./...
+	go test -tags=integration ./internal/adapters/...
 
-# Run tests with coverage
+test-e2e:
+	go test -tags=e2e ./tests/e2e/...
+
 test-coverage:
-	go test -cover ./...
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
-# Run tests with race detection
-test-race:
-	go test -race ./...
-
-# Run tests with verbose output
-test-verbose:
-	go test -v ./...
-
-# Clean test cache
-test-clean:
-	go clean -testcache
+test-watch:
+	find . -name "*.go" | entr -r make test-unit
 ```
-
-## Test Execution
-
-### Running Tests
-
-**All tests:**
-```bash
-go test ./...
-```
-
-**Specific package:**
-```bash
-go test ./internal/application
-```
-
-**With coverage:**
-```bash
-go test -cover ./...
-```
-
-**With race detection:**
-```bash
-go test -race ./...
-```
-
-**Verbose output:**
-```bash
-go test -v ./...
-```
-
-**Short tests only (skip integration):**
-```bash
-go test -short ./...
-```
-
-### Test Coverage
-
-**Generate coverage report:**
-```bash
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out -o coverage.html
-```
-
-**Coverage by function:**
-```bash
-go tool cover -func=coverage.out
-```
-
-**Set coverage threshold:**
-```bash
-go test -cover ./... | grep "coverage:" | awk '{if($3+0 < 80) exit 1}'
-```
-
-## Continuous Integration
 
 ### GitHub Actions
-
-Create `.github/workflows/test.yml`:
 ```yaml
+# .github/workflows/test.yml
 name: Tests
 
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: youmeet_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
     - uses: actions/checkout@v3
     
@@ -739,68 +426,147 @@ jobs:
     - name: Install dependencies
       run: go mod download
     
-    - name: Run tests
-      run: go test -race -coverprofile=coverage.out ./...
+    - name: Run unit tests
+      run: make test-unit
     
-    - name: Check coverage
-      run: |
-        go tool cover -func=coverage.out
-        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
-        echo "Coverage: $COVERAGE%"
-        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-          echo "Coverage is below 80%"
-          exit 1
-        fi
+    - name: Run integration tests
+      run: make test-integration
+      env:
+        DB_TYPE: postgres
+        DATABASE_URL: postgres://postgres:postgres@localhost:5432/youmeet_test?sslmode=disable
+    
+    - name: Generate coverage report
+      run: make test-coverage
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
 ```
 
-## Best Practices
+## Comandos de Teste
 
-### Test Organization
+### Executar Testes
+```bash
+# Todos os testes
+go test ./...
 
-1. **One test file per source file** - `service.go` → `service_test.go`
-2. **Group related tests** - Use subtests for variations
-3. **Clear test names** - Describe what is being tested
-4. **Arrange-Act-Assert** - Structure tests clearly
+# Apenas testes unitários
+go test -short ./...
 
-### Test Data
+# Testes com coverage
+go test -cover ./...
 
-1. **Use test fixtures** - Create reusable test data
-2. **Generate unique IDs** - Use `uuid.New()` for each test
-3. **Avoid shared state** - Each test should be independent
-4. **Use table-driven tests** - For testing multiple scenarios
+# Testes específicos
+go test ./internal/core/services/
 
-### Mocking
+# Testes com verbose
+go test -v ./...
 
-1. **Mock external dependencies** - Databases, APIs, etc.
-2. **Use interfaces** - Enable easy mocking
-3. **Verify interactions** - Assert mock expectations
-4. **Keep mocks simple** - Don't over-complicate
+# Testes em paralelo
+go test -parallel 4 ./...
+```
 
-### Performance Testing
-
-**Benchmark tests:**
+### Benchmarks
 ```go
-func BenchmarkAppointmentService_BookAppointment(b *testing.B) {
-    repo := adapters.NewMemoryRepository()
-    service := application.NewAppointmentService(repo, repo)
-    
-    serviceID := uuid.New()
-    clientID := uuid.New()
-    startTime := "2024-01-15T10:00:00Z"
-    
+func BenchmarkAuthService_Register(b *testing.B) {
+    service := setupAuthService()
+    req := &auth.RegisterRequest{
+        Name:     "Test User",
+        Email:    "test@email.com",
+        Password: "senha123",
+        Role:     "client",
+    }
+
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
-        service.BookAppointment(context.Background(), serviceID, clientID, startTime)
+        service.Register(context.Background(), req)
     }
 }
 ```
 
-**Run benchmarks:**
 ```bash
+# Executar benchmarks
 go test -bench=. ./...
+
+# Benchmark com memory profiling
+go test -bench=. -benchmem ./...
+```
+
+## Boas Práticas
+
+### 1. **Arrange, Act, Assert (AAA)**
+```go
+func TestSomething(t *testing.T) {
+    // Arrange - Setup
+    input := "test"
+    expected := "expected"
+    
+    // Act - Execute
+    result := DoSomething(input)
+    
+    // Assert - Verify
+    if result != expected {
+        t.Errorf("Expected %s, got %s", expected, result)
+    }
+}
+```
+
+### 2. **Table-Driven Tests**
+```go
+func TestValidateEmail(t *testing.T) {
+    tests := []struct {
+        name    string
+        email   string
+        wantErr bool
+    }{
+        {"valid email", "test@email.com", false},
+        {"invalid email", "invalid", true},
+        {"empty email", "", true},
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := ValidateEmail(tt.email)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("ValidateEmail() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+```
+
+### 3. **Test Helpers**
+```go
+// tests/helpers/test_helpers.go
+package helpers
+
+import (
+    "testing"
+    "youmeet/internal/core/domain/user"
+    "github.com/google/uuid"
+)
+
+func CreateTestUser(t *testing.T) *user.User {
+    t.Helper()
+    return &user.User{
+        ID:    uuid.New(),
+        Name:  "Test User",
+        Email: "test@email.com",
+        Role:  "client",
+    }
+}
+```
+
+### 4. **Cleanup**
+```go
+func TestWithCleanup(t *testing.T) {
+    // Setup
+    db := setupTestDB(t)
+    
+    // Cleanup
+    t.Cleanup(func() {
+        db.Close()
+    })
+    
+    // Test logic
+}
 ```
